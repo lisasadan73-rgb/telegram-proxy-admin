@@ -9,8 +9,20 @@ fi
 
 echo "[1/2] 安装 Docker..."
 if ! command -v docker &>/dev/null; then
-  echo "  正在安装 Docker..."
-  curl -fsSL https://get.docker.com | sh
+  echo "  正在安装 Docker（兼容 Ubuntu 20.04 等旧版）..."
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  CODENAME="$(. /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME}")"
+  [ -z "$CODENAME" ] && CODENAME="$(lsb_release -cs 2>/dev/null)" || true
+  [ -z "$CODENAME" ] && CODENAME="focal"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+  apt-get update -qq
+  # 仅安装核心包，避免 docker-model-plugin 等在新源才有、旧系统没有的包
+  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable docker 2>/dev/null || true
   systemctl start docker 2>/dev/null || true
 else
