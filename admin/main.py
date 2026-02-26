@@ -854,32 +854,21 @@ INDEX_HTML = """
       });
     }
     async function showLink(label) {
-      const r = await api(BASE + '/api/users/' + encodeURIComponent(label) + '/link');
-      const d = await r.json();
+      var r = await api(BASE + '/api/users/' + encodeURIComponent(label) + '/link');
+      var d = await r.json();
       if (!r.ok) { toast(d.detail || '获取失败'); return; }
-      const linkToShow = d.https || d.tg || '';
-      const imgEl = document.getElementById('linkQrImage');
+      var linkToShow = d.https || d.tg || '';
+      var imgEl = document.getElementById('linkQrImage');
       document.getElementById('linkQrInput').value = linkToShow;
       document.getElementById('linkQrModal').style.display = 'flex';
       document.getElementById('linkQrModal').classList.remove('hidden');
-      if (d.qr_png_base64) {
-        imgEl.innerHTML = '<img src="data:image/png;base64,' + d.qr_png_base64 + '" alt="QR" style="display:block;width:200px;height:200px;" />';
-        return;
-      }
-      if (linkToShow) {
-        if (typeof QRCode !== 'undefined') {
-          try {
-            var wrap = document.createElement('div');
-            new QRCode(wrap, { text: linkToShow, width: 200, height: 200 });
-            var canvas = wrap.querySelector('canvas');
-            if (canvas) {
-              imgEl.innerHTML = '<img src="' + canvas.toDataURL('image/png') + '" alt="QR" style="display:block;width:200px;height:200px;" />';
-              return;
-            }
-          } catch (e) {}
-        }
-        imgEl.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(linkToShow) + '" alt="QR" style="display:block;width:200px;height:200px;" onerror="this.parentNode.innerHTML=\'<span style=color:#888>暂无二维码</span>\'" />';
-      } else {
+      if (!linkToShow) { imgEl.innerHTML = '<span style="color:#888;">暂无链接</span>'; return; }
+      try {
+        var wrap = document.createElement('div');
+        new QRCode(wrap, { text: linkToShow, width: 200, height: 200 });
+        var canvas = wrap.querySelector('canvas');
+        imgEl.innerHTML = canvas ? '<img src="' + canvas.toDataURL('image/png') + '" alt="QR" style="width:200px;height:200px;" />' : '<span style="color:#888;">暂无二维码</span>';
+      } catch (e) {
         imgEl.innerHTML = '<span style="color:#888;">暂无二维码</span>';
       }
     }
@@ -996,7 +985,11 @@ INDEX_HTML = """
 
 @admin_app.get("/", response_class=HTMLResponse)
 def index():
-    return INDEX_HTML
+    return Response(
+        content=INDEX_HTML,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 # 主应用：仅提供 /admin66 路径，根路径重定向到 /admin66（便于用 nginx 等反代时无需端口）
