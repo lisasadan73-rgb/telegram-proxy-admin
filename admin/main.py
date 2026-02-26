@@ -7,7 +7,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -361,6 +361,47 @@ def delete_user(label: str, _: str = Depends(get_current_user)):
     return {"ok": True}
 
 
+def _normalize_proxy_link(link: str) -> str:
+    """修复 MTProxy 链接中缺失的 &port=，例如 server=1.2.3.4port=665 -> server=1.2.3.4&port=665"""
+    if not link:
+        return link
+    import re
+    return re.sub(r"(server=[^&]+)port=", r"\1&port=", link, count=1)
+
+
+def _make_qr_png_bytes(link: str) -> bytes | None:
+    """根据链接生成二维码 PNG 字节，失败返回 None。"""
+    if not link:
+        return None
+    import io
+    import qrcode
+    try:
+        qr = qrcode.QRCode(version=1, box_size=8, border=2, error_correction=qrcode.constants.ERROR_CORRECT_L)
+        qr.add_data(link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        try:
+            img = qrcode.make(link)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception:
+            return None
+
+
+def _make_qr_base64(link: str) -> str | None:
+    """根据链接生成二维码 PNG 的 base64，失败返回 None。"""
+    raw = _make_qr_png_bytes(link)
+    if not raw:
+        return None
+    import base64
+    return base64.b64encode(raw).decode()
+
+
 @admin_app.get("/api/users/{label}/link")
 def get_link(label: str, _: str = Depends(get_current_user)):
     code, out, err = _run_mtproxymax("secret", "link", label)
@@ -371,10 +412,12 @@ def get_link(label: str, _: str = Depends(get_current_user)):
     https = ""
     for line in lines:
         if line.startswith("tg://"):
-            tg = line.strip()
+            tg = _normalize_proxy_link(line.strip())
         if "t.me/proxy" in line:
-            https = line.strip()
-    return {"tg": tg, "https": https}
+            https = _normalize_proxy_link(line.strip())
+    link_to_use = tg or https
+    qr_b64 = _make_qr_base64(link_to_use) if link_to_use else None
+    return {"tg": tg, "https": https, "qr_png_base64": qr_b64}
 
 
 def _get_link_sync(label: str) -> tuple[str, str]:
@@ -384,9 +427,9 @@ def _get_link_sync(label: str) -> tuple[str, str]:
     tg = https = ""
     for line in out.strip().splitlines():
         if line.startswith("tg://"):
-            tg = line.strip()
+            tg = _normalize_proxy_link(line.strip())
         if "t.me/proxy" in line:
-            https = line.strip()
+            https = _normalize_proxy_link(line.strip())
     return tg, https
 
 
@@ -501,17 +544,50 @@ def get_traffic(_: str = Depends(get_current_user)):
 
 @admin_app.get("/api/users/{label}/qr")
 def get_qr(label: str, _: str = Depends(get_current_user)):
+    tg, https = _get_link_sync(label)
+    link = tg or https
+    if not link:
+        raise HTTPException(status_code=404, detail="未找到链接")
+    b64 = _make_qr_base64(link)
+    if not b64:
+        raise HTTPException(status_code=500, detail="生成二维码失败")
+    return {"qr_png_base64": b64, "link": link}
+
+
+@admin_app.get("/api/users/{label}/qr.png", response_class=Response)
+def get_qr_png(label: str, _: str = Depends(get_current_user)):
+    """直接返回二维码 PNG 图片，前端用 img 或 fetch 加载。"""
+    tg, https = _get_link_sync(label)
+    link = tg or https
+    if not link:
+        raise HTTPException(status_code=404, detail="未找到链接")
+    png = _make_qr_png_bytes(link)
+    if not png:
+        raise HTTPException(status_code=500, detail="生成二维码失败")
+    return Response(content=png, media_type="image/png")
+
+
+class QrLinkRequest(BaseModel):
+    link: str = Field(..., min_length=1, max_length=1024)
+
+
+@admin_app.post("/api/qr")
+def post_qr_from_link(body: QrLinkRequest, _: str = Depends(get_current_user)):
+    """根据任意链接生成二维码（兜底：当 /api/users/{label}/qr 不可用时前端传链接过来）。"""
     import qrcode
     import io
     import base64
-    tg, _ = _get_link_sync(label)
-    if not tg:
-        raise HTTPException(status_code=404, detail="未找到链接")
-    img = qrcode.make(tg)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return {"qr_png_base64": b64, "link": tg}
+    link = _normalize_proxy_link(body.link.strip())
+    if not link:
+        raise HTTPException(status_code=400, detail="链接为空")
+    try:
+        img = qrcode.make(link)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return {"qr_png_base64": b64, "link": link}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成二维码失败: {e}")
 
 
 # ---------- 静态前端 ----------
@@ -541,6 +617,7 @@ INDEX_HTML = """
     .token { word-break: break-all; font-size: 12px; color: #888; }
     a { color: #e94560; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -744,12 +821,9 @@ INDEX_HTML = """
         body: JSON.stringify({ ad_tag: adTag, proxy_domain: proxyDomain || null, proxy_port: proxyPort })
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) { showError('settingsError', data.detail || '保存失败'); return; }
-      const se = document.getElementById('settingsError');
-      se.textContent = '已保存';
-      se.style.color = '#0f0';
-      se.classList.remove('hidden', 'error');
-      setTimeout(function(){ se.textContent = ''; se.classList.add('error'); }, 2000);
+      if (!r.ok) { toast('保存失败：' + (data.detail || '请重试')); showError('settingsError', data.detail || '保存失败'); return; }
+      toast('保存成功');
+      clearError('settingsError');
       loadSettings();
     }
     function logout() {
@@ -783,17 +857,31 @@ INDEX_HTML = """
       const r = await api(BASE + '/api/users/' + encodeURIComponent(label) + '/link');
       const d = await r.json();
       if (!r.ok) { toast(d.detail || '获取失败'); return; }
-      const qr = await api(BASE + '/api/users/' + encodeURIComponent(label) + '/qr').then(res => res.json());
       const linkToShow = d.https || d.tg || '';
       const imgEl = document.getElementById('linkQrImage');
-      if (qr.qr_png_base64) {
-        imgEl.innerHTML = '<img src="data:image/png;base64,' + qr.qr_png_base64 + '" alt="QR" style="display:block;width:200px;height:200px;" />';
-      } else {
-        imgEl.innerHTML = '<span style="color:#888;">暂无二维码</span>';
-      }
       document.getElementById('linkQrInput').value = linkToShow;
       document.getElementById('linkQrModal').style.display = 'flex';
       document.getElementById('linkQrModal').classList.remove('hidden');
+      if (d.qr_png_base64) {
+        imgEl.innerHTML = '<img src="data:image/png;base64,' + d.qr_png_base64 + '" alt="QR" style="display:block;width:200px;height:200px;" />';
+        return;
+      }
+      if (linkToShow) {
+        if (typeof QRCode !== 'undefined') {
+          try {
+            var wrap = document.createElement('div');
+            new QRCode(wrap, { text: linkToShow, width: 200, height: 200 });
+            var canvas = wrap.querySelector('canvas');
+            if (canvas) {
+              imgEl.innerHTML = '<img src="' + canvas.toDataURL('image/png') + '" alt="QR" style="display:block;width:200px;height:200px;" />';
+              return;
+            }
+          } catch (e) {}
+        }
+        imgEl.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(linkToShow) + '" alt="QR" style="display:block;width:200px;height:200px;" onerror="this.parentNode.innerHTML=\'<span style=color:#888>暂无二维码</span>\'" />';
+      } else {
+        imgEl.innerHTML = '<span style="color:#888;">暂无二维码</span>';
+      }
     }
     function closeLinkModal() {
       document.getElementById('linkQrModal').classList.add('hidden');
