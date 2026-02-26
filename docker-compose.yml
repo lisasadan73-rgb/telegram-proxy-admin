@@ -1,0 +1,24 @@
+# Telegram 代理管理后台
+# 使用前请在宿主机安装 MTProxyMax，并将配置目录挂载到下方 volume。
+# 安装: sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/SamNet-dev/MTProxyMax/main/install.sh)"
+
+services:
+  admin:
+    build: .
+    container_name: telegram-proxy-admin
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
+      - MTPROXYMAX_INSTALL_DIR=/opt/mtproxymax
+    volumes:
+      # 生产环境请改为宿主机路径，例如: - /opt/mtproxymax:/opt/mtproxymax
+      - mtproxymax_data:/opt/mtproxymax
+      # 供 mtproxymax restart 重启 telemt 容器
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  mtproxymax_data:

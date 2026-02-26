@@ -1,0 +1,6 @@
+.git
+.cursor
+*.md
+data/
+__pycache__
+*.pyc
