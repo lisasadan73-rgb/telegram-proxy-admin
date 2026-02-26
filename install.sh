@@ -1,8 +1,7 @@
 #!/bin/bash
-# Telegram 代理 + 管理后台 一键部署
+# 安装项目：MTProxyMax 代理 + 管理后台（依赖已安装 Docker，请先运行 install-docker.sh）
 # 用法一（在项目目录）: sudo bash install.sh
-# 用法二（任意目录，一条命令）: curl -fsSL 你的脚本地址 | sudo bash
-#   需先设置: export GIT_REPO=https://github.com/你的用户名/telegram-proxy-admin
+# 用法二（从仓库拉取）: export GIT_REPO=https://github.com/lisasadan73-rgb/telegram-proxy-admin && curl -fsSL https://raw.githubusercontent.com/lisasadan73-rgb/telegram-proxy-admin/main/install.sh | sudo -E bash
 # 可选: ADMIN_PASSWORD=密码 PROXY_PORT=665 JWT_SECRET=随机串
 set -e
 export PROXY_PORT="${PROXY_PORT:-665}"
@@ -15,19 +14,25 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+if ! command -v docker &>/dev/null || ! docker info &>/dev/null; then
+  echo "未检测到 Docker 或 Docker 未就绪。请先运行安装 Docker 的脚本："
+  echo "  curl -fsSL https://raw.githubusercontent.com/lisasadan73-rgb/telegram-proxy-admin/main/install-docker.sh | sudo bash"
+  echo "或在本机执行: sudo bash install-docker.sh"
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/docker-compose.yml" ]; then
-  # 非项目目录（例如 curl 直接执行）：先拉取项目再执行
   INSTALL_DIR="${INSTALL_DIR:-/root/telegram-proxy-admin}"
   GIT_REPO="${GIT_REPO:-}"
   if [ -z "$GIT_REPO" ]; then
     echo "未检测到项目目录且未设置 GIT_REPO。"
     echo "请任选一种方式："
     echo "  1) 将项目拷到服务器后执行: cd 项目目录 && sudo bash install.sh"
-    echo "  2) 设置仓库地址后一键安装: export GIT_REPO=https://github.com/你的用户名/仓库名 && curl -fsSL 脚本URL | sudo -E bash"
+    echo "  2) export GIT_REPO=https://github.com/lisasadan73-rgb/telegram-proxy-admin && curl -fsSL .../install.sh | sudo -E bash"
     exit 1
   fi
-  echo "正在从仓库拉取项目到 ${INSTALL_DIR}..."
+  echo "[1/3] 从仓库拉取项目到 ${INSTALL_DIR}..."
   apt-get update -qq && apt-get install -y -qq git 2>/dev/null || true
   rm -rf "$INSTALL_DIR"
   git clone --depth 1 "$GIT_REPO" "$INSTALL_DIR" || { echo "拉取失败，请检查 GIT_REPO 与网络"; exit 1; }
@@ -36,32 +41,7 @@ fi
 
 cd "$SCRIPT_DIR"
 
-# 第一步：先安装并启动 Docker，再继续后续步骤
-echo "[1/4] 安装 Docker..."
-if ! command -v docker &>/dev/null; then
-  echo "  检测到未安装 Docker，正在安装..."
-  curl -fsSL https://get.docker.com | sh
-  systemctl enable docker 2>/dev/null || true
-  systemctl start docker 2>/dev/null || true
-else
-  echo "  Docker 已安装，版本: $(docker --version)"
-fi
-if ! docker compose version &>/dev/null && ! docker-compose version &>/dev/null; then
-  echo "  正在安装 Docker Compose 插件..."
-  apt-get update -qq && apt-get install -y -qq docker-compose-plugin 2>/dev/null || true
-fi
-echo "  等待 Docker 就绪..."
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  if docker info &>/dev/null; then break; fi
-  sleep 1
-done
-if ! docker info &>/dev/null; then
-  echo "  Docker 未就绪，请检查: systemctl status docker"
-  exit 1
-fi
-echo "  Docker 已就绪。"
-
-echo "[2/4] 安装 MTProxyMax 代理（端口 ${PROXY_PORT}）..."
+echo "[1/3] 安装 MTProxyMax 代理（端口 ${PROXY_PORT}）..."
 if [ ! -f /opt/mtproxymax/mtproxymax ] && [ ! -d /opt/mtproxymax ]; then
   curl -fsSL "https://raw.githubusercontent.com/SamNet-dev/MTProxyMax/main/mtproxymax.sh" -o /tmp/mtproxymax.sh
   printf '%s\n' "$PROXY_PORT" "" "1" "" "n" "" "" "default" "n" "" | timeout 300 bash /tmp/mtproxymax.sh install 2>&1 | tail -20
@@ -70,7 +50,7 @@ else
   echo "  /opt/mtproxymax 已存在，跳过 MTProxyMax 安装"
 fi
 
-echo "[3/4] 生成后台挂载配置..."
+echo "[2/3] 生成后台挂载配置..."
 cat > docker-compose.override.yml << EOF
 # 一键脚本生成：挂载宿主机 MTProxyMax 配置
 services:
@@ -84,7 +64,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 EOF
 
-echo "[4/4] 构建并启动管理后台..."
+echo "[3/3] 构建并启动管理后台..."
 docker compose up -d --build 2>&1
 
 sleep 3

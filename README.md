@@ -7,33 +7,41 @@
 - **代理层**：需在宿主机上先安装 MTProxyMax（一键脚本），代理以 Docker 容器运行，配置位于 `/opt/mtproxymax`。
 - **后台层**：本仓库提供 Docker 镜像与 Compose，运行 Web 管理界面；后台挂载 MTProxyMax 的配置目录并调用其 CLI，实现用户与流量/时长管理。
 
-## 一键部署（新机一条命令）
+## 一键部署（两个脚本）
 
-### 方式 A：项目已在服务器上
+部署分两步：**先装 Docker，再装项目**。
 
-将本仓库拷贝到目标机后，进入项目目录执行：
+### 脚本一：安装 Docker
+
+仅安装 Docker 与 Docker Compose，任意新机执行一条命令即可：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lisasadan73-rgb/telegram-proxy-admin/main/install-docker.sh | sudo bash
+```
+
+或下载到本机后执行：`sudo bash install-docker.sh`。
+
+### 脚本二：安装项目（MTProxyMax + 管理后台）
+
+**前提**：已运行过脚本一，Docker 已就绪。
+
+**方式 A**：项目已在服务器上
 
 ```bash
 cd /root/telegram-proxy-admin   # 或你的项目目录
 sudo bash install.sh
 ```
 
-### 方式 B：真正一条命令（从仓库拉取）
-
-若项目已推送到 GitHub（或其它 git 仓库），在新服务器**任意目录**执行一条命令即可完成部署：
+**方式 B**：从 GitHub 拉取后再安装（任意目录执行）
 
 ```bash
-export GIT_REPO=https://github.com/你的用户名/telegram-proxy-admin
-curl -fsSL https://raw.githubusercontent.com/你的用户名/telegram-proxy-admin/main/install.sh | sudo -E bash
+export GIT_REPO=https://github.com/lisasadan73-rgb/telegram-proxy-admin
+curl -fsSL https://raw.githubusercontent.com/lisasadan73-rgb/telegram-proxy-admin/main/install.sh | sudo -E bash
 ```
 
-脚本会：拉取项目到 `/root/telegram-proxy-admin` → 安装 Docker → 安装 MTProxyMax → 启动管理后台。
+脚本二会：拉取项目（方式 B）→ 安装 MTProxyMax（默认端口 665）→ 生成挂载配置并启动管理后台。完成后访问脚本输出的地址（如 `http://你的IP:8080/`），默认账号 `admin` / 密码 `changeme`，**请尽快修改密码**。
 
----
-
-脚本会依次：安装 Docker（若未安装）→ 非交互安装 MTProxyMax（默认代理端口 665）→ 生成挂载配置并启动管理后台。完成后在浏览器访问脚本输出的地址（如 `http://你的IP:8080/`），使用默认账号 `admin` / 密码 `changeme` 登录，**请尽快修改密码**。
-
-可选环境变量（在运行前设置，方式 B 需加 `-E` 保留变量）：
+**脚本二可选环境变量**（运行前设置，方式 B 需加 `-E`）：
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
@@ -52,7 +60,7 @@ export ADMIN_PASSWORD=你的强密码
 sudo -E bash install.sh
 ```
 
-若要通过 `http://IP/admin66/` 且不写端口，需在 Nginx 中增加 `location /admin66 { proxy_pass http://127.0.0.1:8080; }` 等配置。
+若要通过 `http://IP/admin66/` 且不写端口，需在 Nginx 中配置 `location /admin66 { proxy_pass http://127.0.0.1:8080; }`。
 
 ## 前置条件
 
@@ -133,7 +141,8 @@ sudo -E bash install.sh
 
 ```
 telegram-proxy-admin/
-├── install.sh           # 一键部署脚本（Docker + MTProxyMax + 后台）
+├── install-docker.sh    # 脚本一：仅安装 Docker
+├── install.sh            # 脚本二：安装 MTProxyMax + 管理后台
 ├── docker-compose.yml   # 后台服务与卷挂载
 ├── Dockerfile           # 后台镜像（Python + MTProxyMax 脚本 + Docker CLI）
 ├── admin/
