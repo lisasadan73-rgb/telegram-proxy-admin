@@ -863,11 +863,20 @@ INDEX_HTML = """
       document.getElementById('linkQrModal').style.display = 'flex';
       document.getElementById('linkQrModal').classList.remove('hidden');
       if (!linkToShow) { imgEl.innerHTML = '<span style="color:#888;">暂无链接</span>'; return; }
+      imgEl.innerHTML = '<span style="color:#888;">生成中...</span>';
       try {
         var wrap = document.createElement('div');
         new QRCode(wrap, { text: linkToShow, width: 200, height: 200 });
-        var canvas = wrap.querySelector('canvas');
-        imgEl.innerHTML = canvas ? '<img src="' + canvas.toDataURL('image/png') + '" alt="QR" style="width:200px;height:200px;" />' : '<span style="color:#888;">暂无二维码</span>';
+        function putQr() {
+          var canvas = wrap.querySelector('canvas');
+          var img = wrap.querySelector('img');
+          var dataUrl = null;
+          if (canvas) try { dataUrl = canvas.toDataURL('image/png'); } catch (e) {}
+          if (!dataUrl && img && img.src && img.src.indexOf('data:') === 0) dataUrl = img.src;
+          imgEl.innerHTML = dataUrl ? '<img src="' + dataUrl + '" alt="QR" style="width:200px;height:200px;" />' : '<span style="color:#888;">暂无二维码</span>';
+        }
+        if (wrap.querySelector('canvas')) putQr();
+        else setTimeout(putQr, 350);
       } catch (e) {
         imgEl.innerHTML = '<span style="color:#888;">暂无二维码</span>';
       }
