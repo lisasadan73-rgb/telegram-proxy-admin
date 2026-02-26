@@ -7,7 +7,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -617,7 +617,7 @@ INDEX_HTML = """
     .token { word-break: break-all; font-size: 12px; color: #888; }
     a { color: #e94560; }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="qrcode.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -981,6 +981,22 @@ INDEX_HTML = """
 </body>
 </html>
 """
+
+
+_QRCODE_JS_PATH = os.path.join(os.path.dirname(__file__), "static", "qrcode.min.js")
+
+
+@admin_app.get("/qrcode.min.js", response_class=Response)
+def serve_qrcode_js():
+    """本地提供 qrcode 库，不依赖 CDN，确保扫码即可用。"""
+    if not os.path.isfile(_QRCODE_JS_PATH):
+        raise HTTPException(status_code=404, detail="qrcode.min.js not found")
+    with open(_QRCODE_JS_PATH, "rb") as f:
+        return Response(
+            content=f.read(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
 
 @admin_app.get("/", response_class=HTMLResponse)
